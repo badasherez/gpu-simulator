@@ -44,7 +44,7 @@ ampere_result = ampere.matmul(A, B)
 
 ## Reproduce Paper Results
 ```bash
-python3 experiments/H100_reproduction.py
+python3 experiments/GPU_reproduction.py
 
 ```
 
