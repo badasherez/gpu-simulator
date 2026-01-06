@@ -320,7 +320,7 @@ def test_extended_range_accumulation(dtype=torch.bfloat16):
     result = mma(A, B, acc=C)
     return result[0, 0, 0].item() == 2.0 ** 127
 
-def test_accumulator_position(dtype=torch.bfloat16, group_size = 16):
+def test_accumulator_position(dtype=torch.bfloat16, num_products = 16):
     """
     Determine if accumulator is added at the beginning or end of the group.
     
@@ -335,7 +335,7 @@ def test_accumulator_position(dtype=torch.bfloat16, group_size = 16):
         str: "beginning" or "end"
     """
     # Test with S = {-1} union with product indices
-    S = {-1} | set(range(group_size))
+    S = {-1} | set(range(num_products))
     
     is_neutral = test_computationally_neutral_subgroup(S, dtype, turn_of_accumulator = False)
     if is_neutral:
@@ -358,9 +358,9 @@ def find_accumulation_group_size(dtype=torch.bfloat16):
     while k < 16:
         S = [i for i in range(k)]
         if test_computationally_neutral_subgroup(S, dtype):
-            return k + 1
+            return k
         k *= 2
-    return 17
+    return 16
 
 
 
@@ -410,12 +410,12 @@ if __name__ == "__main__":
     
     # 1. Accumulation group size
     print("Accumulation group size...")
-    group_size = find_accumulation_group_size(dtype)
-    print(f"{group_size} elements\n")
+    num_products = find_accumulation_group_size(dtype)
+    print(f"{num_products} elements\n")
     
     # 2. Accumulator position
     print("Accumulator position...")
-    acc_position = test_accumulator_position(dtype, group_size - 1)
+    acc_position = test_accumulator_position(dtype, num_products)
     print(f"{acc_position}\n")
     
     # 3. Internal representation
@@ -475,11 +475,12 @@ if __name__ == "__main__":
     
     # Group size with clarification
     if acc_position == "beginning":
-        print(f"Accumulation:             16 products summed, then accumulator added at beginning")
+        group_size = num_products + 1  # group_size includes accumulator
+        print(f"Accumulation:             {num_products} products + accumulator (at beginning)")
         print(f"Group size:               {group_size} elements")
     else:
         print(f"Accumulation:             Accumulator at end - NOT IMPLEMENTED")
-        print(f"Group size:               {group_size} elements (not supported)")
+        # print(f"Group size:               {group_size} elements (not supported)")
     
     print(f"Internal precision:       {c} bits")
     print(f"Shift rounding:           {mode_str}")
