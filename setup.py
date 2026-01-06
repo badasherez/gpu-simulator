@@ -17,6 +17,7 @@ ext_modules = [
             "src/gfloat.cpp", 
             "src/Hopper_simulator.cpp",
             "src/Ampere_simulator.cpp",
+            "src/Custom_simulator.cpp",
             "utils/utils.cpp"
         ],
         include_dirs=[

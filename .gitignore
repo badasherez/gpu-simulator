@@ -13,3 +13,11 @@ Makefile
 *.dll
 *.dylib
 *.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/

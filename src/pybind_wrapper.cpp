@@ -1,12 +1,13 @@
 #include <torch/extension.h>
 #include "../include/Hopper_simulator.h"
 #include "../include/Ampere_simulator.h"
+#include "../include/Custom_simulator.h"
 #include "../utils/utils.h"
 
 namespace py = pybind11;
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.doc() = "GPU Simulator Python Bindings (Hopper & Ampere)"; // Optional module docstring
+    m.doc() = "GPU Simulator Python Bindings (Hopper, Ampere, Custom)"; // Optional module docstring
     
     // Bind the Hopper_simulator class
     py::class_<Hopper_simulator>(m, "Hopper_simulator")
@@ -40,7 +41,21 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
              "Compute group sum of Gfloat array",
              py::arg("array"));
     
-
+    // Bind the Custom_simulator class (user-configurable)
+    py::class_<Custom_simulator>(m, "Custom_simulator")
+        .def(py::init<>())
+        .def("matmul_bfloat16", &Custom_simulator::matmul_bfloat16,
+             "Perform matrix multiplication using bfloat16 to Gfloat conversion",
+             py::arg("A"), py::arg("B"))
+        .def("matmul_float16", &Custom_simulator::matmul_float16,
+             "Perform matrix multiplication using float16 to Gfloat conversion",
+             py::arg("A"), py::arg("B"))
+        .def("matmul", &Custom_simulator::matmul,
+             "Perform matrix multiplication with automatic dtype dispatch (bfloat16 or float16)",
+             py::arg("A"), py::arg("B"))
+        .def("group_sum", &Custom_simulator::group_sum,
+             "Compute group sum of Gfloat array",
+             py::arg("array"));
     
     // Bind utility functions
     m.def("bfloat16_to_gfloat_tensor", &bfloat16_to_gfloat_tensor,

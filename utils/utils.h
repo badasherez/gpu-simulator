@@ -19,6 +19,15 @@ constexpr int AMPERE_ACCUMULATOR_GROUP_SIZE = 9;
 constexpr int FP32_SIGNIFICAND_WIDTH = 24;
 constexpr int16_t FP32_MIN_NONZERO_EXPONENT = -126;
 
+// Constants for Custom GPU (user-configurable)
+// Update these values based on your GPU_reproduction.py output:
+// - CUSTOM_ZERO_EXPONENT: Use "Minimal max exponent" from output
+// - CUSTOM_SIGNIFICAND_WIDTH: Use "Internal precision" + 1
+// - CUSTOM_ACCUMULATOR_GROUP_SIZE: Use "Accumulation group size"
+constexpr int16_t CUSTOM_ZERO_EXPONENT = -133;          // Default: H100 value
+constexpr int CUSTOM_SIGNIFICAND_WIDTH = 26;            // Default: H100 value (25 + 1)
+constexpr int CUSTOM_ACCUMULATOR_GROUP_SIZE = 17;       // Default: H100 value
+
 struct GfloatTensor {
     std::vector<Gfloat> data;
     std::vector<int64_t> shape;
