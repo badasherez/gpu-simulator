@@ -1,8 +1,10 @@
 import torch
 import math
+from itertools import combinations
+from tqdm import tqdm
 from tensor_cores_mma import mma
 
-def reproduction_internal_representaion(dtype):
+def find_internal_precision(dtype):
     left = torch.zeros(1,16, 16, dtype=dtype, device="cuda")
     right = torch.zeros(1,16, 16, dtype=dtype, device="cuda").mT
     left[0, 0, 0] = 1.0
@@ -19,7 +21,7 @@ def reproduction_internal_representaion(dtype):
         if result[0, 0, 0] != 2.0**(-c):
             return c-1
         c += 1
-def recovery_normalization_overflow(internal_size, dtype):
+def test_normalization_overflow(internal_size, dtype):
     left = torch.zeros(1,16, 16, dtype=dtype, device="cuda")
     right = torch.zeros(1,16, 16, dtype=dtype, device="cuda").mT
     left[0, 0, 0] = 1.5
@@ -34,7 +36,7 @@ def recovery_normalization_overflow(internal_size, dtype):
     
     return result[0, 0, 0] != 2.0**(-internal_size)
 
-def recovery_normalization_subnormal_multiplication(internal_size, dtype):
+def test_subnormal_normalization(internal_size, dtype):
     left = torch.zeros(1,16, 16, dtype=dtype, device="cuda")
     right = torch.zeros(1,16, 16, dtype=dtype, device="cuda").mT
     if dtype == torch.float16:
@@ -53,14 +55,14 @@ def recovery_normalization_subnormal_multiplication(internal_size, dtype):
     
     return result[0, 0, 0] == 2.0**(-1-internal_size)
 
-def test_computationally_neutral_subgroup(S, dtype=torch.bfloat16, turn_of_accumulator =True):
+def test_computationally_neutral_subgroup(S, dtype=torch.bfloat16, turn_off_accumulator =True):
     """
     Test for a Computationally Neutral Subgroup
     
     Args:
         S: A set of product indices {k1, k2, ..., km} from {-1,0, ..., 15}
         dtype: Data type for tensor operations (torch.bfloat16 or torch.float16)
-        turn_of_accumulator: ignore the accumulator when testing for computational neutrality
+        turn_off_accumulator: ignore the accumulator when testing for computational neutrality
     
     Returns:
         bool: True if the subgroup is computationally neutral (bitwise equal results)
@@ -77,7 +79,7 @@ def test_computationally_neutral_subgroup(S, dtype=torch.bfloat16, turn_of_accum
     
     # Set C[0,0] based on whether 0 is in S
     C_cancel[0, 0, 0] = V_large if -1 in S else V_small
-    if turn_of_accumulator:
+    if turn_off_accumulator:
         C_cancel[0, 0, 0] = 0
     
     # Set up product values for cancellation scenario
@@ -125,7 +127,7 @@ def test_computationally_neutral_subgroup(S, dtype=torch.bfloat16, turn_of_accum
     
     # Set C[0,0] based on whether -1 is in S
     C_zero[0, 0, 0] = 0.0 if -1 in S else V_small
-    if turn_of_accumulator:
+    if turn_off_accumulator:
         C_zero[0, 0, 0] = 0.0
     
     # Set up product values for zero scenario
@@ -337,7 +339,7 @@ def test_accumulator_position(dtype=torch.bfloat16, num_products = 16):
     # Test with S = {-1} union with product indices
     S = {-1} | set(range(num_products))
     
-    is_neutral = test_computationally_neutral_subgroup(S, dtype, turn_of_accumulator = False)
+    is_neutral = test_computationally_neutral_subgroup(S, dtype, turn_off_accumulator = False)
     if is_neutral:
         return "beginning"
     else:
@@ -345,22 +347,106 @@ def test_accumulator_position(dtype=torch.bfloat16, num_products = 16):
 
 def find_accumulation_group_size(dtype=torch.bfloat16):
     """
-    Find the accumulation group size for the GPU architecture.
+    Find all computationally neutral subgroups by exhaustive search over
+    every subset of {-1, 0, 1, ..., 15} with at least 2 elements.
     
-    Returns the number of elements (products + accumulator) in one group.
-    - Hopper (H100): 17 elements
-    - Ampere (A100): 9 elements
+    Prints the nested structure showing how subgroups nest inside each other,
+    e.g. ((accumulator, 0, 1, 2, 3, 4, 5, 6, 7), 8, 9, 10, 11, 12, 13, 14, 15)
+    
+    Also determines accumulator position from the results:
+    - If -1 (accumulator) is in the smallest neutral group -> "beginning"
+    - Otherwise -> "end"
     
     Returns:
-        int: Accumulation group size (including accumulator)
+        tuple: (num_products, acc_position) where num_products is the number of
+               products (excluding accumulator) in the smallest neutral group,
+               and acc_position is "beginning" or "end".
     """
-    k = 2
-    while k < 16:
-        S = [i for i in range(k)]
-        if test_computationally_neutral_subgroup(S, dtype):
-            return k
-        k *= 2
-    return 16
+    all_indices = list(range(-1, 16))  # {-1, 0, 1, ..., 15}
+    n = len(all_indices)  # 17
+
+    neutral_subgroups = []
+
+    all_subsets = [(size, subset)
+                   for size in range(2, n + 1)
+                   for subset in combinations(all_indices, size)]
+
+    for size, subset in tqdm(all_subsets, desc="  Searching neutral subgroups"):
+        S = list(subset)
+        if test_computationally_neutral_subgroup(S, dtype, turn_off_accumulator=False):
+            neutral_subgroups.append(S)
+
+    # Print results
+    if neutral_subgroups:
+        def fmt_group(sg):
+            return [("accumulator" if x == -1 else x) for x in sg]
+        for sg in neutral_subgroups:
+            print(f"  Neutral subgroup (size {len(sg)}): {fmt_group(sg)}")
+        nested = _build_nested_repr(neutral_subgroups)
+        print(f"  Nested structure: {nested}")
+
+    # Determine accumulator position from the smallest neutral group
+    smallest = min(neutral_subgroups, key=len)
+    num_products = sum(1 for x in smallest if x != -1)
+    acc_position = "beginning" if -1 in smallest else "end"
+
+    return num_products, acc_position
+
+
+def _build_nested_repr(neutral_subgroups):
+    """
+    Build a nested tuple representation showing how subgroups nest inside each other.
+
+    E.g. if {-1,0,...,7} is neutral and {-1,0,...,15} is also neutral:
+        ((-1, 0, 1, 2, 3, 4, 5, 6, 7), 8, 9, 10, 11, 12, 13, 14, 15)
+    """
+    if not neutral_subgroups:
+        return "()"
+
+    sorted_groups = sorted(neutral_subgroups, key=len, reverse=True)
+
+    def nest(group, subgroups):
+        group_set = set(group)
+
+        # Find all proper subgroups contained in this group
+        proper_subs = [sg for sg in subgroups if set(sg) < group_set]
+
+        # Keep only maximal ones (not contained in another proper subgroup)
+        maximal_subs = []
+        for sg in proper_subs:
+            sg_set = set(sg)
+            if not any(sg_set < set(other) for other in proper_subs):
+                maximal_subs.append(sg)
+
+        def fmt(x):
+            return "accumulator" if x == -1 else str(x)
+
+        if not maximal_subs:
+            return "(" + ", ".join(fmt(x) for x in sorted(group)) + ")"
+
+        # Replace each maximal subgroup with its nested repr
+        covered = set()
+        nested_parts = []
+        for sg in sorted(maximal_subs, key=lambda s: min(s)):
+            inner_subs = [s for s in proper_subs if set(s) < set(sg)]
+            nested_parts.append((min(sg), nest(sg, inner_subs)))
+            covered.update(sg)
+
+        # Merge nested parts and remaining elements in sorted order
+        all_parts = []
+        for elem in sorted(group):
+            if elem in covered:
+                for min_val, repr_str in nested_parts:
+                    if elem == min_val:
+                        all_parts.append(repr_str)
+                        break
+            else:
+                all_parts.append(fmt(elem))
+
+        return "(" + ", ".join(all_parts) + ")"
+
+    root = sorted_groups[0]
+    return nest(root, sorted_groups[1:])
 
 
 
@@ -408,46 +494,40 @@ if __name__ == "__main__":
     print(f"Testing dtype: {dtype}")
     print("="*70)
     
-    # 1. Accumulation group size
+    # 1. Accumulation group size and accumulator position
     print("Accumulation group size...")
-    num_products = find_accumulation_group_size(dtype)
-    print(f"{num_products} elements\n")
+    num_products, acc_position = find_accumulation_group_size(dtype)
     
-    # 2. Accumulator position
-    print("Accumulator position...")
-    acc_position = test_accumulator_position(dtype, num_products)
-    print(f"{acc_position}\n")
-    
-    # 3. Internal representation
+    # 2. Internal representation
     print("Internal representation...")
-    c = reproduction_internal_representaion(dtype)
+    c = find_internal_precision(dtype)
     if c is None:
         print("ERROR: Could not determine")
         exit(1)
     print(f"{c} bits\n")
     
-    # 4. Shift operation rounding
+    # 3. Shift operation rounding
     print("Shift operation rounding...")
     shift_rounding = detect_rounding_mode(c, dtype)
     mode_str = shift_rounding if isinstance(shift_rounding, str) else shift_rounding[0]
     print(f"{mode_str}\n")
     
-    # 5. Normalization overflow  
+    # 4. Normalization overflow  
     print("Normalization overflow...")
-    overflow = recovery_normalization_overflow(c, dtype)
+    overflow = test_normalization_overflow(c, dtype)
     print(f"{'YES' if overflow else 'NO'}\n")
     
-    # 6. Final summation rounding
+    # 5. Final summation rounding
     print("Final summation rounding...")
     final_rounding, reduction = test_final_summation_rounding(dtype)
     print(f"{final_rounding}\n")
     
-    # 7. Subnormal behavior
+    # 6. Subnormal behavior
     print("Subnormal multiplication...")
-    subnormal_norm = recovery_normalization_subnormal_multiplication(c, torch.float16)
+    subnormal_norm = test_subnormal_normalization(c, torch.float16)
     print(f"{'YES' if subnormal_norm else 'NO'}\n")
     
-    # 8. Extended-range accumulation (bfloat16 only)
+    # 7. Extended-range accumulation (bfloat16 only)
     if dtype == torch.bfloat16:
         print("Extended-range accumulation...")
         extended_range = test_extended_range_accumulation(dtype)
@@ -455,7 +535,7 @@ if __name__ == "__main__":
     else:
         extended_range = None
     
-    # 9. Minimal max exponent (bfloat16 only)
+    # 8. Minimal max exponent (bfloat16 only)
     if dtype == torch.bfloat16:
         print("Minimal max exponent...")
         min_max_exp = find_minimal_max_exponent(c, dtype)

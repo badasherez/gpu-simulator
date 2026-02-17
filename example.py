@@ -1,8 +1,5 @@
 import torch
 import gpu_simulator_py
-from expirements.tensor_cores_mma import mma
-from tqdm import tqdm
-import struct
 # Initialize both architectures
 hopper = gpu_simulator_py.Hopper_simulator()
 ampere = gpu_simulator_py.Ampere_simulator()
