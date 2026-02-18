@@ -9,9 +9,6 @@ find_package(Torch REQUIRED)
 
 include_directories(include)
 
-# Main executable
-add_executable(gpu_simulator src/main.cpp src/gfloat.cpp utils/utils.cpp)
-
 # Python module
 pybind11_add_module(gpu_simulator_py 
     src/pybind_wrapper.cpp 

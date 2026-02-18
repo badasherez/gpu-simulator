@@ -51,7 +51,3 @@ bool Gfloat::get_sign() const {
 int16_t Gfloat::get_exponent() const {
     return exponent_;
 }
-
-
-
- 

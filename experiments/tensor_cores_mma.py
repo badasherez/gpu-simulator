@@ -171,10 +171,6 @@ def mma(left: Tensor, right: Tensor, acc: Optional[Tensor] = None, result_dtype:
 
     assert left.size(-1) == right.size(-2)
 
-    # dst = torch.zeros(*left.shape[:-1], right.size(-1), dtype=left.dtype, device=left.device)
-    # plan.run(left, right, dst, dst, print_module=False, stream=torch.cuda.current_stream().cuda_stream)
-
-    # dst = torch.matmul(left, right)
     if acc is None:
         acc = torch.zeros(*left.shape[:-1], right.size(-1), dtype=torch.float32, device=left.device)
     else:
@@ -200,11 +196,10 @@ def mma(left: Tensor, right: Tensor, acc: Optional[Tensor] = None, result_dtype:
     return dst
 
 if __name__ == "__main__":
-    left = torch.zeros(1,8, 32, dtype=torch.bfloat16, device="cuda")
-    right = torch.zeros(1,8, 32, dtype=torch.bfloat16, device="cuda").mT
-    left[0, 0, 0] = 1
-    right[0, 0, 0] = 1
-    left = left.to(torch.float8_e4m3fn)
-    right = right.to(torch.float8_e4m3fn)
+    # Quick smoke test for bf16 WMMA
+    left = torch.zeros(1, 16, 16, dtype=torch.bfloat16, device="cuda")
+    right = torch.zeros(1, 16, 16, dtype=torch.bfloat16, device="cuda").mT
+    left[0, 0, 0] = 1.0
+    right[0, 0, 0] = 1.0
     result = mma(left, right)
-    print(result[0, 0, 0].item())
+    print(f"bf16 mma: {result[0, 0, 0].item()} (expected 1.0)")
