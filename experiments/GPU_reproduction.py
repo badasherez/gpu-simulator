@@ -159,10 +159,10 @@ def detect_rounding_mode(c, dtype=torch.bfloat16):
     """
     candidates = [
         "nearest_tie_towards_0",
-        "nearest_tie_towards_minus_infinity",
+        "nearest_tie_away_from_0",
         "nearest_tie_towards_even",
         "towards_0",
-        "towards_minus_infinity",
+        "away_from_0",
         "towards_even"
     ]
     
@@ -178,16 +178,22 @@ def detect_rounding_mode(c, dtype=torch.bfloat16):
     right[0, 1, 0] = -1.0
     right[0, 2, 0] = 2.0 ** exp_b
     
-    # Test 1
-    if mma(left, right)[0, 0, 0].item() != 0.0:
-        return None
+    # Test 1: positive half-ULP — D = 1 - 1 + 2^(-(c+1))
+    # result == 0: rounded towards 0 (eliminates away_from_0)
+    # result != 0: rounded away from 0 (only away_from_0 modes)
+    if mma(left, right)[0, 0, 0].item() == 0.0:
+        candidates = [m for m in candidates if "away_from_0" not in m]
+    else:
+        candidates = ["nearest_tie_away_from_0", "away_from_0"]
     
-    # Test 2
+    # Test 2: negative half-ULP — D = 1 - 1 - 2^(-(c+1))
+    # Symmetric test: result == 0 means rounded towards 0 (consistent),
+    # result != 0 means rounded away from 0 (consistent)
     left[0, 0, 2] = -(2.0 ** exp_a)
     if mma(left, right)[0, 0, 0].item() == 0.0:
-        candidates = [m for m in candidates if "minus_infinity" not in m]
+        candidates = [m for m in candidates if "away_from_0" not in m]
     else:
-        candidates = ["nearest_tie_towards_minus_infinity", "towards_minus_infinity"]
+        candidates = [m for m in candidates if "away_from_0" in m]
     
     # Test 3
     exp_base = -math.ceil(c / 2)
@@ -227,37 +233,87 @@ def detect_rounding_mode(c, dtype=torch.bfloat16):
 
 def test_final_summation_rounding(dtype=torch.bfloat16):
     """
-    Determine the rounding mode applied to the final summation result.
-    
+    Detect the rounding mode of the final result using candidate
+    elimination (Algorithm 9).
+
+    Uses 2.25 * 2^24 as the reference magnitude. At this exponent (25),
+    f32 ULP = 2^(25-23) = 4. The +3 and -1 corrections probe how the
+    hardware rounds values that fall between representable f32 values.
+
     Returns:
         tuple: (rounding_mode, reduction_amount)
     """
-    left = torch.zeros(1, 16, 16, dtype=dtype, device="cuda")
-    right = torch.zeros(1, 16, 16, dtype=dtype, device="cuda").mT
-    
-    # Test 1: Baseline
-    left[0, 0, 0] = 1.5 * (2.0 ** 12)
-    right[0, 0, 0] = 1.5 * (2.0 ** 12)
-    left[0, 0, 1] = 3.0
-    right[0, 1, 0] = 1.0
-    
-    baseline = mma(left, right)[0, 0, 0].item()
-    
-    # Test 2: With -1 correction
-    left[0, 0, 1] = 1.0
-    right[0, 1, 0] = -1.0
-    
-    actual = mma(left, right)[0, 0, 0].item()
+    candidates = [
+        "nearest_tie_towards_0",
+        "nearest_tie_away_from_0",
+        "nearest_tie_towards_even",
+        "towards_0",
+        "away_from_0",
+        "towards_even"
+    ]
+
+    ref = 2.25 * (2.0 ** 24)  # = 37748736, exactly representable in f32
+    # f32 ULP at exponent 25 = 4
+    # next f32 value above ref: ref + 4 = 37748740
+    # next f32 value below ref: ref - 4 = 37748732
+
+    # 1. Initialize all entries of A, B, C to 0
+    A = torch.zeros(1, 16, 16, dtype=dtype, device="cuda")
+    B = torch.zeros(1, 16, 16, dtype=dtype, device="cuda").mT
+    C = torch.zeros(1, 16, 16, dtype=torch.float32, device="cuda")
+
+    # 2-4. Test 1 (baseline): internal sum = 2.25*2^24 + 3 = 37748739
+    A[0, 0, 0] = 1.5 * (2.0 ** 12)
+    B[0, 0, 0] = 1.5 * (2.0 ** 12)
+    A[0, 0, 1] = 3.0
+    B[0, 1, 0] = 1.0
+
+    # 5. Compute D = C + A * B
+    D = mma(A, B, acc=C)
+
+    # 6. Test 1: internal sum was ref + 3.
+    #    At f32, ULP = 4 at exponent 25. Nearest representable above ref is ref + 4.
+    #    ref + 3 is distance 3 from ref and distance 1 from ref + 4.
+    #    If baseline == ref: rounded towards zero (not nearest) → eliminates nearest + away_from_0
+    #    If baseline == ref + 4: rounded to nearest / away from zero → eliminates towards_0
+    baseline = D[0, 0, 0].item()
+    if baseline == ref:
+        candidates = [m for m in candidates if "nearest" not in m]
+        candidates = [m for m in candidates if m != "away_from_0"]
+    elif baseline == ref + 4:
+        candidates = [m for m in candidates if m != "towards_0"]
+
+    # 7. Reset
+    A = torch.zeros(1, 16, 16, dtype=dtype, device="cuda")
+    B = torch.zeros(1, 16, 16, dtype=dtype, device="cuda").mT
+    C = torch.zeros(1, 16, 16, dtype=torch.float32, device="cuda")
+
+    # 8-10. Test 2 (sign-changing correction): internal sum = ref - 1
+    #    ref - 1 is distance 1 from ref and distance 3 from ref - 4.
+    A[0, 0, 0] = 1.5 * (2.0 ** 12)
+    B[0, 0, 0] = 1.5 * (2.0 ** 12)
+    A[0, 0, 1] = 1.0
+    B[0, 1, 0] = -1.0
+
+    # 11. Compute D = C + A * B
+    D = mma(A, B, acc=C)
+
+    # 12. Observe reduction
+    actual = D[0, 0, 0].item()
     reduction = baseline - actual
-    
-    # Determine mode
-    if reduction == 0:
-        rounding_mode = "round_to_nearest"
-    elif reduction > 0:
-        rounding_mode = "truncation"
-    else:
-        rounding_mode = "unknown"
-    
+
+    # 13. Test 2 analysis:
+    #     towards_0:    ref - 1 → ref - 4 (truncate towards zero), reduction > 0
+    #     towards_even: ref - 1 → ref (even neighbor), reduction = 0
+    #     away_from_0:  ref - 1 → ref (away from zero = up for positive), reduction = 0
+    #     nearest modes: ref - 1 → ref (distance 1), reduction = 0
+    if reduction > 0:
+        candidates = [m for m in candidates if m not in ("towards_even", "away_from_0")]
+        candidates = [m for m in candidates if "nearest" not in m]
+    elif reduction == 0:
+        candidates = [m for m in candidates if m != "towards_0"]
+
+    rounding_mode = candidates[0] if len(candidates) == 1 else candidates
     return rounding_mode, int(reduction)
 
 def find_minimal_max_exponent(m, dtype=torch.bfloat16):

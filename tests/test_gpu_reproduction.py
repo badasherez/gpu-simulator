@@ -170,5 +170,148 @@ class TestBitExactTiles:
         print(f"✓ PASSED: All {total_elements:,} elements are bit-exact!")
 
 
+class TestFP8BitExactTiles:
+    """
+    Bit-exact tile reproduction tests for FP8 E4M3 (Hopper QGMMA).
+    
+    Requires SM90+ (Hopper) GPU with FP8 support.
+    Tiles are 64x32 (A) x 128x32 (B) → 64x128 (D) in float32.
+    """
+    
+    def test_10k_tiles_fp8_bitexact(self, fp8_simulator, mma_fp8_function, check_fp8_support):
+        """
+        Test bit-exact reproduction over 10,000 random FP8 E4M3 tiles.
+        
+        Each tile: A[64,32] e4m3 @ B[128,32]^T e4m3 → D[64,128] f32
+        """
+        num_tiles = 10_000
+        tile_elements = 64 * 128  # 8192 elements per tile
+        total_elements = num_tiles * tile_elements
+        
+        mismatches = 0
+        mismatch_examples = []
+        
+        print(f"\n{'='*60}")
+        print(f"FP8 E4M3 Test: {num_tiles:,} tiles ({total_elements:,} elements)")
+        print(f"GPU: {check_fp8_support}")
+        print(f"Tile shape: A[64,32] @ B[128,32]^T → D[64,128]")
+        print(f"{'='*60}")
+        
+        for tile_idx in range(num_tiles):
+            torch.manual_seed(tile_idx)
+            torch.cuda.manual_seed(tile_idx)
+            
+            # Generate random FP8 E4M3 tiles
+            A = torch.randn(64, 32, dtype=torch.float32, device="cuda").to(torch.float8_e4m3fn)
+            B = torch.randn(128, 32, dtype=torch.float32, device="cuda").to(torch.float8_e4m3fn)
+            
+            # Run on real GPU tensor cores (QGMMA)
+            gpu_result = mma_fp8_function(
+                A.unsqueeze(0), B.unsqueeze(0)
+            )[0].cpu()
+            
+            # Run on simulator
+            sim_result = fp8_simulator.matmul(A.cpu(), B.cpu())
+            
+            # Bit-exact comparison
+            sim_flat = sim_result.flatten()
+            gpu_flat = gpu_result.flatten()
+            
+            for i in range(tile_elements):
+                sim_bits = float_to_bits(sim_flat[i].item())
+                gpu_bits = float_to_bits(gpu_flat[i].item())
+                
+                if sim_bits != gpu_bits:
+                    mismatches += 1
+                    if len(mismatch_examples) < 5:
+                        mismatch_examples.append({
+                            'tile': tile_idx,
+                            'element': i,
+                            'sim': sim_flat[i].item(),
+                            'gpu': gpu_flat[i].item(),
+                            'sim_bits': bits_to_hex(sim_bits),
+                            'gpu_bits': bits_to_hex(gpu_bits),
+                        })
+            
+            if (tile_idx + 1) % 2_000 == 0:
+                print(f"  Processed {tile_idx + 1:,} tiles... (mismatches so far: {mismatches})")
+        
+        match_rate = (total_elements - mismatches) / total_elements * 100
+        
+        print(f"\n{'='*60}")
+        print(f"RESULTS: FP8 E4M3")
+        print(f"{'='*60}")
+        print(f"Total elements: {total_elements:,}")
+        print(f"Bit-exact matches: {total_elements - mismatches:,}")
+        print(f"Mismatches: {mismatches}")
+        print(f"Match rate: {match_rate:.6f}%")
+        
+        if mismatch_examples:
+            print(f"\nFirst mismatches:")
+            for m in mismatch_examples:
+                print(f"  Tile {m['tile']}, elem {m['element']}: "
+                      f"sim={m['sim']:.8e} ({m['sim_bits']}) vs "
+                      f"gpu={m['gpu']:.8e} ({m['gpu_bits']})")
+        
+        print(f"{'='*60}\n")
+        
+        assert mismatches == 0, \
+            f"FAILED: {mismatches:,} mismatches out of {total_elements:,} elements ({match_rate:.6f}% match rate)"
+        
+        print(f"✓ PASSED: All {total_elements:,} elements are bit-exact!")
+
+    def test_1k_tiles_fp8_bitexact(self, fp8_simulator, mma_fp8_function, check_fp8_support):
+        """
+        Quick test: 1,000 random FP8 E4M3 tiles.
+        """
+        num_tiles = 1_000
+        tile_elements = 64 * 128
+        total_elements = num_tiles * tile_elements
+        
+        mismatches = 0
+        
+        print(f"\n{'='*60}")
+        print(f"Quick FP8 test: {num_tiles:,} tiles ({total_elements:,} elements)")
+        print(f"{'='*60}")
+        
+        for tile_idx in range(num_tiles):
+            torch.manual_seed(tile_idx)
+            torch.cuda.manual_seed(tile_idx)
+            
+            A = torch.randn(64, 32, dtype=torch.float32, device="cuda").to(torch.float8_e4m3fn)
+            B = torch.randn(128, 32, dtype=torch.float32, device="cuda").to(torch.float8_e4m3fn)
+            
+            gpu_result = mma_fp8_function(
+                A.unsqueeze(0), B.unsqueeze(0)
+            )[0].cpu()
+            
+            sim_result = fp8_simulator.matmul(A.cpu(), B.cpu())
+            
+            sim_flat = sim_result.flatten()
+            gpu_flat = gpu_result.flatten()
+            
+            for i in range(tile_elements):
+                if float_to_bits(sim_flat[i].item()) != float_to_bits(gpu_flat[i].item()):
+                    mismatches += 1
+            
+            if (tile_idx + 1) % 200 == 0:
+                print(f"  Processed {tile_idx + 1:,} tiles... (mismatches so far: {mismatches})")
+        
+        match_rate = (total_elements - mismatches) / total_elements * 100
+        
+        print(f"\n{'='*60}")
+        print(f"RESULTS: FP8 E4M3")
+        print(f"{'='*60}")
+        print(f"Total elements: {total_elements:,}")
+        print(f"Mismatches: {mismatches}")
+        print(f"Match rate: {match_rate:.6f}%")
+        print(f"{'='*60}\n")
+        
+        assert mismatches == 0, \
+            f"FAILED: {mismatches:,} mismatches out of {total_elements:,} elements"
+        
+        print(f"✓ PASSED: All {total_elements:,} elements are bit-exact!")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

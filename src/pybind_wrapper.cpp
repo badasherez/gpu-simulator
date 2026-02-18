@@ -1,5 +1,6 @@
 #include <torch/extension.h>
 #include "../include/Hopper_simulator.h"
+#include "../include/Hopper_fp8_simulator.h"
 #include "../include/Ampere_simulator.h"
 #include "../include/Custom_simulator.h"
 #include "../utils/utils.h"
@@ -23,6 +24,17 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
              py::arg("A"), py::arg("B"))
         .def("group_sum", &Hopper_simulator::group_sum,
              "Compute group sum of Gfloat array",
+             py::arg("array"));
+
+    // Bind the Hopper_fp8_simulator class
+    py::class_<Hopper_fp8_simulator>(m, "Hopper_fp8_simulator")
+        .def(py::init<>())
+        .def("matmul", &Hopper_fp8_simulator::matmul,
+             "FP8 E4M3 matrix multiply: A[M,K] @ B^T[N,K] -> D[M,N] (f32)\n"
+             "Simulates QGMMA.64xNx32.F32.E4M3.E4M3 with 14-bit internal precision",
+             py::arg("A"), py::arg("B"))
+        .def("group_sum", &Hopper_fp8_simulator::group_sum,
+             "Compute group sum of Gfloat array (14-bit internal, single group)",
              py::arg("array"));
 
     // Bind the Ampere_simulator class

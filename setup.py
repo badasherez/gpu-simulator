@@ -16,6 +16,7 @@ ext_modules = [
             "src/pybind_wrapper.cpp",
             "src/gfloat.cpp", 
             "src/Hopper_simulator.cpp",
+            "src/Hopper_fp8_simulator.cpp",
             "src/Ampere_simulator.cpp",
             "src/Custom_simulator.cpp",
             "utils/utils.cpp"

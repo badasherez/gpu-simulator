@@ -17,6 +17,7 @@ pybind11_add_module(gpu_simulator_py
     src/pybind_wrapper.cpp 
     src/gfloat.cpp 
     src/Hopper_simulator.cpp 
+    src/Hopper_fp8_simulator.cpp
     utils/utils.cpp)
 
 # Link libraries

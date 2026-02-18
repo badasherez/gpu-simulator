@@ -15,6 +15,12 @@ constexpr int16_t AMPERE_ZERO_EXPONENT = -132;  // Different from Hopper
 constexpr int AMPERE_SIGNIFICAND_WIDTH = 25;
 constexpr int AMPERE_ACCUMULATOR_GROUP_SIZE = 9;
 
+// Constants for Hopper FP8 E4M3 (QGMMA) architecture
+// Characterized via GPU_reproduction_fp8.py on H100
+constexpr int16_t HOPPER_FP8_ZERO_EXPONENT = -139;
+constexpr int HOPPER_FP8_SIGNIFICAND_WIDTH = 14;          // 13 fractional + 1 implicit
+constexpr int HOPPER_FP8_ACCUMULATOR_GROUP_SIZE = 33;     // acc + 32 products, single group
+
 // Constants for FP32 format
 constexpr int FP32_SIGNIFICAND_WIDTH = 24;
 constexpr int16_t FP32_MIN_NONZERO_EXPONENT = -126;
@@ -79,5 +85,19 @@ Gfloat multiply_bfloat16_to_gfloat(uint16_t a, uint16_t b, int16_t zero_exponent
  * @return Gfloat Result of the multiplication
  */
 Gfloat multiply_float16_to_gfloat(uint16_t a, uint16_t b, int16_t zero_exponent);
+
+/**
+ * @brief Multiplies two float8_e4m3 values and returns a Gfloat result
+ * 
+ * E4M3fn format: 1 sign bit, 4 exponent bits (bias=7), 3 mantissa bits.
+ * Subnormals are NOT normalized (kept denormalized).
+ * Product of two 4-bit significands = 8-bit result, shifted to fill Gfloat.
+ * 
+ * @param a First float8_e4m3 value (raw byte)
+ * @param b Second float8_e4m3 value (raw byte)
+ * @param zero_exponent The zero exponent value for the target architecture
+ * @return Gfloat Result of the multiplication
+ */
+Gfloat multiply_fp8e4m3_to_gfloat(uint8_t a, uint8_t b, int16_t zero_exponent);
 
 #endif // UTILS_H

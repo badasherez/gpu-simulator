@@ -80,6 +80,49 @@ Gfloat multiply_bfloat16_to_gfloat(uint16_t a, uint16_t b, int16_t zero_exponent
     return Gfloat(result_sign, result_exponent, result_significand);
 }
 
+Gfloat multiply_fp8e4m3_to_gfloat(uint8_t a, uint8_t b, int16_t zero_exponent) {
+    // E4M3fn format: 1 sign bit, 4 exponent bits (bias=7), 3 mantissa bits
+    // Subnormals are NOT normalized (characterization result)
+    
+    // Extract components from first e4m3 (a)
+    bool sign_a = (a >> 7) & 1;
+    uint8_t exp_bits_a = (a >> 3) & 0x0F;  // 4 bits for exponent
+    uint8_t sig_bits_a = a & 0x07;          // 3 bits for mantissa
+    
+    // Extract components from second e4m3 (b)
+    bool sign_b = (b >> 7) & 1;
+    uint8_t exp_bits_b = (b >> 3) & 0x0F;  // 4 bits for exponent
+    uint8_t sig_bits_b = b & 0x07;          // 3 bits for mantissa
+    
+    // Calculate significands with implicit leading 1 (if not subnormal)
+    // Subnormals (exp=0) keep their significand as-is (NOT normalized)
+    int32_t significand_a = (exp_bits_a != 0) ? (sig_bits_a | 0x08) : sig_bits_a;  // 0x08 = 2^3
+    int32_t significand_b = (exp_bits_b != 0) ? (sig_bits_b | 0x08) : sig_bits_b;  // 0x08 = 2^3
+    if (exp_bits_a == 0) {
+        exp_bits_a = 1;  // subnormal exponent = 1 - bias = -6
+    }
+    if (exp_bits_b == 0) {
+        exp_bits_b = 1;
+    }
+    
+    // Multiply significands: 4-bit × 4-bit = 8-bit result
+    // Shift left by 17 to fill 25 bits (8 + 17 = 25, fits in Gfloat's int32 significand)
+    int32_t result_significand = (significand_a * significand_b) << 17;
+    
+    // Calculate result exponent: (exp_a - 7) + (exp_b - 7) = exp_a + exp_b - 14
+    int16_t result_exponent = exp_bits_a + exp_bits_b - 14;
+    
+    // XOR the signs
+    bool result_sign = sign_a ^ sign_b;
+    
+    // Handle zero result
+    if (result_significand == 0) {
+        return Gfloat(result_sign, zero_exponent, 0);
+    }
+    
+    return Gfloat(result_sign, result_exponent, result_significand);
+}
+
 Gfloat multiply_float16_to_gfloat(uint16_t a, uint16_t b, int16_t zero_exponent) {
     // Extract components from first float16 (a)
     // Float16 format: 1 sign bit, 5 exponent bits, 10 mantissa bits

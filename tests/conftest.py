@@ -97,6 +97,30 @@ def mma_function(check_cuda):
     return mma
 
 
+@pytest.fixture(scope="session")
+def fp8_simulator():
+    """Initialize Hopper FP8 E4M3 simulator."""
+    import gpu_simulator_py
+    return gpu_simulator_py.Hopper_fp8_simulator()
+
+
+@pytest.fixture(scope="session")
+def check_fp8_support(check_cuda):
+    """Verify the GPU supports FP8 E4M3 (Hopper SM90+)."""
+    cc = torch.cuda.get_device_capability(0)
+    if cc[0] < 9:
+        pytest.skip(f"FP8 E4M3 WGMMA requires SM90+ (Hopper). Found SM{cc[0]}{cc[1]}")
+    device_name = torch.cuda.get_device_name(0)
+    return device_name
+
+
+@pytest.fixture(scope="session")
+def mma_fp8_function(check_fp8_support):
+    """Get the FP8 E4M3 WGMMA function."""
+    from tensor_cores_mma import mma_fp8_e4m3
+    return mma_fp8_e4m3
+
+
 @pytest.fixture
 def random_seed():
     """Set random seed for reproducibility."""
