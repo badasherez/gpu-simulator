@@ -14,7 +14,7 @@ pip install -r requirements.txt
 python3 setup.py build_ext --inplace
 ```
 
-## 🎯 Quick Start
+## Quick Start
 
 ```python
 import torch
@@ -99,6 +99,3 @@ pytest tests/ -k "10k" --simulator=custom --hardware=any -v -s
 python3 experiments/GPU_reproduction.py
 ```
 
----
-
-**Built for reproducible GPU research** 🔬 | **Enabling deterministic tensor analysis** 📊 | **Advancing ML system understanding** 🚀
