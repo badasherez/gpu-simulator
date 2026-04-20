@@ -2,7 +2,7 @@
 
 A GPU simulator for reproducing and analyzing GPU-level non-deterministic behavior in tensor processing units. This research tool enables precise simulation of **any GPU architecture** by discovering and configuring hardware-specific characteristics.
 
-Hawkeye is based on the paper "Hawkeye: Reproducing GPU-Level Non-Determinism" (https://arxiv.org/abs/2603.20421).
+Hawkeye is based on the paper "Hawkeye: Reproducing GPU-Level Non-Determinism" (https://arxiv.org/abs/2603.20421), published in MLSys 2026. 
 
 **Authors:**  
 - Erez Badash
